@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>청록도 스마트 온실 & 나트륨-염소 전지 통합 시뮬레이터</title>
+    <style>
+        :root {
+            --bg-dark: #040710;
+            --panel-bg: rgba(8, 16, 32, 0.96);
+            --border-blue: #1d4ed8;
+            --neon-cyan: #00f3ff;
+            --neon-green: #39ff14;
+            --neon-orange: #ff9900;
+            --neon-yellow: #eab308;
+            --text-light: #f1f5f9;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Malgun Gothic', sans-serif; }
+        body { background-color: var(--bg-dark); color: var(--text-light); overflow: hidden; height: 100vh; }
+
+        /* 3단 대시보드 구조 레이아웃 */
+        .workspace {
+            display: grid;
+            grid-template-columns: 310px 1fr 350px;
+            height: 100vh;
+            padding: 12px;
+            gap: 12px;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 2px solid var(--border-blue);
+            border-radius: 10px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+        }
+
+        .panel-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #ffffff;
+            border-bottom: 2px solid var(--border-blue);
+            padding-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .achieve-badge {
+            background: var(--border-blue);
+            color: var(--neon-cyan);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+
+        /* 왼쪽: 미션 상태 스택 */
+        .problem-container { display: flex; flex-direction: column; gap: 8px; }
+        .problem-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid #223249;
+            border-radius: 6px;
+            padding: 10px;
+            position: relative;
+        }
+
+        .prob-badge {
+            display: inline-block; font-size: 10px; padding: 1px 5px;
+            border-radius: 3px; font-weight: bold; margin-bottom: 4px;
+            background: #7f1d1d; color: #fca5a5;
+        }
+        .prob-title { font-size: 12px; font-weight: bold; color: #fff; }
+        .prob-desc { font-size: 11px; color: #94a3b8; margin: 3px 0; line-height: 1.4; }
+        .prob-hint { font-size: 11px; color: var(--neon-cyan); font-family: monospace; }
+
+        .solve-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(11, 19, 36, 0.96); border-radius: 6px;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            color: var(--neon-green); font-weight: bold; font-size: 12px;
+            border: 1px solid var(--neon-green); text-align: center; padding: 6px;
+        }
+
+        /* 중앙: 3D 가시화 뷰포트 */
+        .center-viewport { position: relative; background: #010307; border-radius: 10px; border: 2px solid var(--border-blue); overflow: hidden; }
+        #threeCanvas { width: 100%; height: 100%; display: block; }
+
+        .cam-guide {
+            position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.85);
+            border: 1px solid var(--border-blue); padding: 6px 10px; border-radius: 4px;
+            font-size: 11px; line-height: 1.4; pointer-events: none; z-index: 5;
+        }
+
+        /* 하단 브리핑 인터랙션 알림 창 */
+        .inspect-popup {
+            position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%);
+            background: rgba(4, 10, 22, 0.96); border: 2px solid var(--neon-cyan);
+            padding: 12px 18px; border-radius: 6px; width: 500px; display: none; z-index: 100;
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.4);
+        }
+        .inspect-title { font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 4px; display: flex; justify-content: space-between; }
+        .inspect-desc { font-size: 11px; color: #cbd5e1; line-height: 1.4; }
+
+        /* 오른쪽: 종합 환경 가시화 대시보드 */
+        .hud-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .hud-card {
+            background: rgba(255,255,255,0.02); border: 1px solid #1e2e47;
+            border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 2px;
+        }
+        .hud-label { font-size: 11px; color: #64748b; }
+        .hud-value { font-size: 14px; font-weight: bold; color: var(--neon-cyan); font-family: monospace; }
+        
+        .switch-grid { display: grid; grid-template-columns: 1fr; gap: 5px; }
+        .switch-btn {
+            background: #0f1a2c; border: 1px solid #2d3d57; color: #fff; padding: 9px 12px;
+            border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer;
+            display: flex; justify-content: space-between; align-items: center; transition: all 0.2s;
+        }
+        .switch-btn:hover { background: #18263c; }
+        .switch-btn.active { border-color: var(--neon-green); background: rgba(57, 255, 20, 0.12); }
+
+        /* 구역/장치 링크 스타일 */
+        .device-link-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+        .dev-link {
+            background: rgba(29, 78, 216, 0.15); border: 1px dashed #2563eb;
+            color: #93c5fd; padding: 6px; border-radius: 4px; font-size: 11px;
+            cursor: pointer; text-align: left; transition: all 0.2s;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .dev-link:hover { background: rgba(29, 78, 216, 0.35); color: #fff; border-style: solid; }
+        .zone-header { grid-column: span 2; font-size: 11px; color: var(--neon-yellow); font-weight: bold; margin-top: 4px; padding-left: 2px;}
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+<div class="workspace">
+    <aside class="panel">
+        <div class="panel-title">
+            <span>온실 현안 과제 스택</span>
+            <span class="achieve-badge" id="txtProgress">해결 달성도: 0%</span>
+        </div>
+        <div class="problem-container" id="probContainer">
+            <div class="problem-card" id="prob1">
+                <div class="solve-overlay" id="overlay1">✔ 미션 1 해결 성공! (세척 완료)</div>
+                <span class="prob-badge">미해결</span>
+                <div class="prob-title">⚠️ 해풍 소금기 과잉 및 토양 건조</div>
+                <div class="prob-desc">염분이 누적되고 수분이 급격히 증발해 식물이 고사 중입니다.</div>
+                <div class="prob-hint">[소금기 포집 필터] + [미세 스프링클러]</div>
+            </div>
+            <div class="problem-card" id="prob2">
+                <div class="solve-overlay" id="overlay2">✔ 미션 2 해결 성공! (공조 복구)</div>
+                <span class="prob-badge">미해결</span>
+                <div class="prob-title">⚠️ 내부 대류 마비 및 밀폐 열기 고온화</div>
+                <div class="prob-desc">공기 순환이 멈춰 돔 내부 온도가 42도를 돌파했습니다.</div>
+                <div class="prob-hint">[초고속 환풍기] + [빗물 냉각 터빈]</div>
+            </div>
+            <div class="problem-card" id="prob3">
+                <div class="solve-overlay" id="overlay3">✔ 미션 3 해결 성공! (수로 개방)</div>
+                <span class="prob-badge">미해결</span>
+                <div class="prob-title">⚠️ 지하수 보관소 토사 붕괴 및 고립</div>
+                <div class="prob-desc">진입로가 바위에 막혀 내부 용수 계측이 불가능합니다.</div>
+                <div class="prob-hint">[지하수 탐사 드론] + [연구실 기지 메인 전력]</div>
+            </div>
+        </div>
+    </aside>
+
+    <main class="center-viewport">
+        <div class="cam-guide">
+            <strong>[3D 피지컬 관제 계통]</strong> 조감도 요소를 클릭하거나 오른쪽 패널에서 장비를 클릭하면 정밀 이동하며 설명이 연동됩니다.
+        </div>
+        <canvas id="threeCanvas"></canvas>
+        
+        <div class="inspect-popup" id="inspectPopup">
+            <div class="inspect-title">
+                <span id="insTitle">장치 계통 정보</span>
+                <span style="color:var(--neon-cyan); font-size:11px; cursor:pointer;" onclick="resetCameraView()">[전체 조감 뷰 보기]</span>
+            </div>
+            <div class="inspect-desc" id="insDesc">센서 통신 모듈 데이터를 스캔 중입니다.</div>
+        </div>
+    </main>
+
+    <aside class="panel">
+        <div class="panel-title">환경 모니터링 종합 대시보드</div>
+        <div class="hud-grid">
+            <div class="hud-card"><div class="hud-label">돔 내부 온도</div><div class="hud-value" id="val-temp">42.5 °C</div></div>
+            <div class="hud-card"><div class="hud-label">토양 염분 농도</div><div class="hud-value" id="val-salt">0.84 %</div></div>
+            <div class="hud-card"><div class="hud-label">대기 상대 습도</div><div class="hud-value" id="val-hum">28.0 %</div></div>
+            <div class="hud-card"><div class="hud-label">지하수 보관 수위</div><div class="hud-value" id="val-water">UNKNOWN</div></div>
+            <div class="hud-card" style="grid-column: span 2;">
+                <div class="hud-label">나트륨 전지 전하 잔량 (Na+ Accumulation)</div>
+                <div class="hud-value" id="val-charge" style="color:var(--neon-green)">50 %</div>
+                <div class="progress-outer"><div class="progress-inner" id="barCharge" style="width: 50%;"></div></div>
+            </div>
+        </div>
+
+        <div class="panel-title" style="margin-top:2px;">조감도 구역별 장비 원격 인터랙션</div>
+        <div class="device-link-list">
+            <div class="zone-header">📍 ZONE 1 : 스마트 돔 온실 구역</div>
+            <button class="dev-link" onclick="triggerHardwareFocus('dome')">🕌 온실 외벽 유리 돔</button>
+            <button class="dev-link" onclick="triggerHardwareFocus('fan')">🌪️ 공조 서보 환풍팬</button>
+            <button class="dev-link" onclick="triggerHardwareFocus('sprinkler')">💦 미세 스프링클러 노즐</button>
+            <button class="dev-link" onclick="triggerHardwareFocus('filter')">⚡ 소금기 대기 필터</button>
+
+            <div class="zone-header">📍 ZONE 2 : 물리 화학 반응 전기실 구역</div>
+            <button class="dev-link" onclick="triggerHardwareFocus('battery')">🔋 나트륨-염소 전해조</button>
+            <button class="dev-link" onclick="triggerHardwareFocus('tank')">🧪 황색 염소 가스 탱크</button>
+
+            <div class="zone-header">📍 ZONE 3 : 동굴 및 용수 공급원 구역</div>
+            <button class="dev-link" onclick="triggerHardwareFocus('drone')">🤖 지하수 탐사 드론</button>
+
+            <div class="zone-header">📍 ZONE 4 : 연구동 메인 컨트롤 타워</div>
+            <button class="dev-link" onclick="triggerHardwareFocus('lab')">🏢 통합 연구 제어 기지</button>
+        </div>
+
+        <div class="panel-title" style="margin-top: 2px;">물리 제어 시퀀스 액추에이터</div>
+        <div class="switch-grid">
+            <button class="switch-btn" id="sw-salt" onclick="toggleSwitch('salt')"><span>⚡ 소금기 포집 필터기</span><span id="st-salt">OFF</span></button>
+            <button class="switch-btn" id="sw-sprinkler" onclick="toggleSwitch('sprinkler')"><span>💦 미세 분무 스프링클러</span><span id="st-sprinkler">OFF</span></button>
+            <button class="switch-btn" id="sw-fan" onclick="toggleSwitch('fan')"><span>🌪️ 돔 상부 초고속 환풍팬</span><span id="st-fan">OFF</span></button>
+            <button class="switch-btn" id="sw-rain" onclick="toggleSwitch('rain')"><span>🌧️ 지붕 빗물 냉각 터빈</span><span id="st-rain">OFF</span></button>
+            <button class="switch-btn" id="sw-drone" onclick="toggleSwitch('drone')"><span>🤖 지하수 탐사 드론</span><span id="st-drone">OFF</span></button>
+            <button class="switch-btn" id="sw-building" onclick="toggleSwitch('building')"><span>🏢 연구실 기지 메인 전력</span><span id="st-building">OFF</span></button>
+        </div>
+    </aside>
+</div>
+
+<script>
+    let scene, camera, renderer, controls, raycaster, mouse;
+    let ghDome, fanMesh, droneMesh, labBuilding, chlorineTank, waterParticles;
+    let sprinklerNode, saltFilterNode, batteryCellBox;
+    let naIonParticles, clIonParticles, gasMoveParticles, electronParticles;
+    let clickableObjects = [];
+
+    // 카메라 부드러운 선형 보간 비행 제어 파라미터
+    let targetCamPos = new THREE.Vector3(14, 11, 15);
+    let targetLookAt = new THREE.Vector3(0, 0, 0);
+    let isTransitioning = false;
+
+    let activeSwitches = { salt: false, sprinkler: false, fan: false, rain: false, drone: false, building: false };
+    let solvedMissions = { m1: false, m2: false, m3: false };
+    let batteryVal = 50.0;
+
+    // 조감도 평면 기반 Zone 1 ~ Zone 4 완벽 빌드 매핑 테이블
+    const hardwareMap = {
+        dome: { name: "🕌 [ZONE 1] 스마트 유리 온실 외벽 돔", desc: "외부의 유해한 염분 섞인 해풍과 고온 기후 변화를 완벽 차단하는 통합 차폐 세이프티 아크릴 돔 챔버입니다.", camPos: {x: 2, y: 7, z: 6}, lookAt: {x: -1.5, y: 1.75, z: 0} },
+        fan: { name: "🌪️ [ZONE 1] 공조 서보 역회전 초고속 환풍팬", desc: "돔 최고 전고점에 위치하여 상부에 정체된 열대 대류 공기를 고속으로 흡입 외부 방출해 온도를 하강시키는 통풍 팬입니다.", camPos: {x: -1.5, y: 4.2, z: 1.5}, lookAt: {x: -1.5, y: 3.4, z: 0} },
+        sprinkler: { name: "💦 [ZONE 1] 고압 용수 미세 분무 스프링클러 노즐", desc: "관로를 거친 정밀 순수를 미세 안개 형태로 변환 사출하여 식물 잎사귀 표면 세척 및 토양 수분을 즉각 충전하는 살수 유닛입니다.", camPos: {x: -1.5, y: 2.5, z: 1.8}, lookAt: {x: -1.5, y: 3.1, z: 0} },
+        filter: { name: "⚡ [ZONE 1] 정전 흡착식 소금기 대기 포집 필터 모듈", desc: "공기 중에 누적된 나트륨 결정을 고전압 정전 유도식 장막으로 강제 응축 흡착 흡수하여 대기 투명도를 조율하는 환경 정화 필터입니다.", camPos: {x: -2.0, y: 1.0, z: 2.2}, lookAt: {x: -2.8, y: 0.3, z: 1.0} },
+        battery: { name: "🔋 [ZONE 2] 구체화된 나트륨-염소(Na-Cl) 전해 반응조 수조", desc: "청록도 주변의 풍부한 소금물(NaCl) 전해액을 활용한 친환경 2차 전지입니다. 충전 시 Na+ 이온은 탄소판(-) 극으로 가 흐르고 Cl- 이온은 철판(+) 극으로 이동해 유독 염소 가스로 분리 배출되며 기전력을 축적합니다.", camPos: {x: 4.0, y: 3.0, z: 4.5}, lookAt: {x: 3.0, y: 0.6, z: 2.5} },
+        tank: { name: "🧪 [ZONE 2] 외부 격리형 고압 염소 가스 포집 저장 탱크", desc: "나트륨 배터리가 가동 충전될 때 전해 반응으로 수조 내부에서 생성 분리된 염소 가스(Cl2)를 관로 파이프로 실시간 전송받아 안전 수집하는 압축 격리조입니다.", camPos: {x: 6.5, y: 3.0, z: 0.5}, lookAt: {x: 4.5, y: 1.1, z: -1.5} },
+        drone: { name: "🤖 [ZONE 3] 무선 궤도 수로 개척 탐사 모빌리티 드론", desc: "토사 붕괴로 인간의 출입이 정지된 지하 공동 구역에 고속 급파되어 내부 센싱 및 통로 잔해 균열을 개척하는 전술 지능형 로봇 유닛입니다.", camPos: {x: 0.0, y: 2.0, z: 4.0}, lookAt: {x: -1.5, y: 0.8, z: 2.5} },
+        lab: { name: "🏢 [ZONE 4] 청록도 통합 환경 연구 제어 기지동 본관", desc: "각종 아두이노 네트워크 직렬 통신 기판 및 트랜지스터 전원 제어반 릴레이 스위치 어레이가 집약된 기지 통합 메인 컨트롤 타워 빌딩입니다.", camPos: {x: -7.0, y: 4.0, z: -0.5}, lookAt: {x: -4.8, y: 1.2, z: -3.2} }
+    };
+
+    function initThree() {
+        const wrapper = document.querySelector('.center-viewport');
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x040710);
+
+        camera = new THREE.PerspectiveCamera(45, wrapper.clientWidth / wrapper.clientHeight, 0.1, 1000);
+        camera.position.copy(targetCamPos);
+
+        renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('threeCanvas'), antialias: true });
+        renderer.setSize(wrapper.clientWidth, wrapper.clientHeight);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+        const sun = new THREE.DirectionalLight(0x00f3ff, 0.85);
+        sun.position.set(12, 18, 10);
+        scene.add(sun);
+
+        // 녹색 지반
+        const islandGeo = new THREE.CylinderGeometry(7.5, 8.5, 1.2, 32);
+        const islandMat = new THREE.MeshStandardMaterial({ color: 0x114022, roughness: 0.9 });
+        const island = new THREE.Mesh(islandGeo, islandMat);
+        island.position.y = -0.6;
+        scene.add(island);
+
+        // ZONE 1: 유리 온실
+        const domeGeo = new THREE.CylinderGeometry(3.2, 3.6, 3.5, 32, 2, true);
+        const domeMat = new THREE.MeshPhysicalMaterial({
+            color: 0x00f3ff, transparent: true, opacity: 0.12, roughness: 0.05, clearcoat: 1.0, side: THREE.DoubleSide
+        });
+        ghDome = new THREE.Mesh(domeGeo, domeMat);
+        ghDome.position.set(-1.5, 1.75, 0);
+        scene.add(ghDome);
+        ghDome.userData = hardwareMap.dome;
+        clickableObjects.push(ghDome);
+
+        const frame = new THREE.Mesh(domeGeo, new THREE.MeshStandardMaterial({ color: 0x22344d, wireframe: true }));
+        frame.position.set(-1.5, 1.75, 0);
+        scene.add(frame);
+
+        // 스프링클러 노즐
+        sprinklerNode = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.4, 8), new THREE.MeshStandardMaterial({ color: 0x00f3ff, metalness: 0.8 }));
+        sprinklerNode.position.set(-1.5, 3.1, 0);
+        scene.add(sprinklerNode);
+        sprinklerNode.userData = hardwareMap.sprinkler;
+        clickableObjects.push(sprinklerNode);
+
+        // 소금기 포집 필터
+        saltFilterNode = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.6), new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.3 }));
+        saltFilterNode.position.set(-2.8, 0.3, 1.0);
+        scene.add(saltFilterNode);
+        saltFilterNode.userData = hardwareMap.filter;
+        clickableObjects.push(saltFilterNode);
+
+        // 환풍팬
+        fanMesh = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.05, 0.2), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+        fanMesh.position.set(-1.5, 3.4, 0);
+        scene.add(fanMesh);
+        fanMesh.userData = hardwareMap.fan;
+        clickableObjects.push(fanMesh);
+
+        createPlantMesh(-2.0, 0, -0.6, 0x16a34a, "🌿 내염성 바이오 플랜트 1호");
+        createPlantMesh(-0.8, 0, 0.8, 0xdb2777, "🌸 보존종 해안 식물 표본 2호");
+
+        // ZONE 2: 염소 가스 탱크
+        const tankGroup = new THREE.Group();
+        const tankGeo = new THREE.CylinderGeometry(0.7, 0.7, 2.0, 16);
+        const tankMat = new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.7, roughness: 0.15 });
+        chlorineTank = new THREE.Mesh(tankGeo, tankMat);
+        chlorineTank.position.y = 1.0;
+        tankGroup.add(chlorineTank);
+        
+        const pipeGeo = new THREE.CylinderGeometry(0.06, 0.06, 2.2, 8).rotateZ(Math.PI/2);
+        const pipe = new THREE.Mesh(pipeGeo, new THREE.MeshStandardMaterial({ color: 0x556677, transparent:true, opacity:0.6 }));
+        pipe.position.set(-0.7, 0.1, 2.0);
+        tankGroup.add(pipe);
+        tankGroup.position.set(4.5, 0, -1.5);
+        scene.add(tankGroup);
+        chlorineTank.userData = hardwareMap.tank;
+        clickableObjects.push(chlorineTank);
+
+        // ZONE 3: 지하수 탐사 드론
+        droneMesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.14, 0.5), new THREE.MeshStandardMaterial({ color: 0xd97706 }));
+        droneMesh.position.set(-1.5, 0.8, 2.5);
+        scene.add(droneMesh);
+        droneMesh.userData = hardwareMap.drone;
+        clickableObjects.push(droneMesh);
+
+        // ZONE 4: 통합 환경 제어동 건물
+        labBuilding = new THREE.Mesh(new THREE.BoxGeometry(2.0, 2.4, 2.0), new THREE.MeshStandardMaterial({ color: 0x0f172a, emissive: 0x000000 }));
+        labBuilding.position.set(-4.8, 1.2, -3.2);
+        scene.add(labBuilding);
+        labBuilding.userData = hardwareMap.lab;
+        clickableObjects.push(labBuilding);
+
+        // ZONE 2 코어: 나트륨 전지 전해 수조 구조물
+        const batteryGroup = new THREE.Group();
+        batteryGroup.position.set(3.0, 0, 2.5);
+
+        const caseGeo = new THREE.BoxGeometry(1.6, 1.2, 1.2);
+        const caseMat = new THREE.MeshPhysicalMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.2, roughness: 0.1, transmission: 0.6, side: THREE.DoubleSide });
+        batteryCellBox = new THREE.Mesh(caseGeo, caseMat);
+        batteryCellBox.position.y = 0.6;
+        batteryGroup.add(batteryCellBox);
+
+        const platePlus = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 0.8), new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.9 }));
+        platePlus.position.set(-0.5, 0.6, 0);
+        batteryGroup.add(platePlus);
+
+        const plateMinus = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 0.8), new THREE.MeshStandardMaterial({ color: 0x111c2c, roughness: 0.5 }));
+        plateMinus.position.set(0.5, 0.6, 0);
+        batteryGroup.add(plateMinus);
+        scene.add(batteryGroup);
+
+        batteryCellBox.userData = hardwareMap.battery;
+        clickableObjects.push(batteryCellBox);
+
+        // 구리 핵심 전선 배선망 가설 라인
+        createCopperWire([-4.8, 2.4, -3.2], [3.0, 1.2, 2.5]); 
+        createCopperWire([3.0, 1.2, 2.5], [-1.5, 3.1, 0]);  
+
+        // 물리 이온 / 기체 / 전하 시스템 입자 생성
+        const ionCount = 30;
+        
+        const naGeo = new THREE.BufferGeometry();
+        const naArr = new Float32Array(ionCount * 3);
+        for(let i=0; i<ionCount*3; i+=3) { naArr[i] = 3.0 + (Math.random()-0.5)*0.8; naArr[i+1] = 0.2 + Math.random()*0.8; naArr[i+2] = 2.5 + (Math.random()-0.5)*0.8; }
+        naGeo.setAttribute('position', new THREE.BufferAttribute(naArr, 3));
+        naIonParticles = new THREE.Points(naGeo, new THREE.PointsMaterial({ color: 0x00f3ff, size: 0.09, transparent: true, opacity: 0.9 }));
+        scene.add(naIonParticles);
+
+        const clGeo = new THREE.BufferGeometry();
+        const clArr = new Float32Array(ionCount * 3);
+        for(let i=0; i<ionCount*3; i+=3) { clArr[i] = 3.0 + (Math.random()-0.5)*0.8; clArr[i+1] = 0.2 + Math.random()*0.8; clArr[i+2] = 2.5 + (Math.random()-0.5)*0.8; }
+        clGeo.setAttribute('position', new THREE.BufferAttribute(clArr, 3));
+        clIonParticles = new THREE.Points(clGeo, new THREE.PointsMaterial({ color: 0xff7700, size: 0.08, transparent: true, opacity: 0.9 }));
+        scene.add(clIonParticles);
+
+        const gasCount = 40;
+        const gasGeo = new THREE.BufferGeometry();
+        const gasArr = new Float32Array(gasCount * 3);
+        for(let i=0; i<gasCount*3; i+=3) { gasArr[i] = 2.5 + Math.random()*2.0; gasArr[i+1] = 0.2 + Math.random()*0.6; gasArr[i+2] = 2.5 - Math.random()*4.0; }
+        gasGeo.setAttribute('position', new THREE.BufferAttribute(gasArr, 3));
+        gasMoveParticles = new THREE.Points(gasGeo, new THREE.PointsMaterial({ color: 0xeab308, size: 0.06, transparent: true, opacity: 0 }));
+        scene.add(gasMoveParticles);
+
+        // 초고휘도 전하 전자(Electron) 파티클 시스템 (형광 형광 연두 가속)
+        const elecCount = 60;
+        const elecGeo = new THREE.BufferGeometry();
+        const elecArr = new Float32Array(elecCount * 3);
+        for(let i=0; i<elecCount*3; i+=3) { elecArr[i] = 3.0; elecArr[i+1] = 1.2; elecArr[i+2] = 2.5; }
+        elecGeo.setAttribute('position', new THREE.BufferAttribute(elecArr, 3));
+        electronParticles = new THREE.Points(elecGeo, new THREE.PointsMaterial({
+            color: 0x39ff14, size: 0.18, transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending
+        }));
+        scene.add(electronParticles);
+
+        const pCount = 80;
+        const pGeo = new THREE.BufferGeometry();
+        const pPos = new Float32Array(pCount * 3);
+        for(let i=0; i<pCount*3; i+=3) { pPos[i] = -1.5 + (Math.random()-0.5)*2.3; pPos[i+1] = 3.0; pPos[i+2] = (Math.random()-0.5)*2.3; }
+        pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+        waterParticles = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x22d3ee, size: 0.04, transparent: true, opacity: 0 }));
+        scene.add(waterParticles);
+
+        raycaster = new THREE.Raycaster();
+        mouse = new THREE.Vector2();
+        window.addEventListener('click', onSceneObjectClick);
+    }
+
+    function createCopperWire(start, end) {
+        const p1 = new THREE.Vector3(...start);
+        const p2 = new THREE.Vector3(...end);
+        const points = [p1, new THREE.Vector3(p1.x, Math.max(p1.y, p2.y)+1.5, p1.z), new THREE.Vector3(p2.x, Math.max(p1.y, p2.y)+1.5, p2.z), p2];
+        const curve = new THREE.CatmullRomCurve3(points);
+        const wireGeo = new THREE.TubeGeometry(curve, 20, 0.02, 6, false);
+        const wireMat = new THREE.MeshStandardMaterial({ color: 0xb45309, metalness: 0.8, roughness: 0.2 });
+        scene.add(new THREE.Mesh(wireGeo, wireMat));
+    }
+
+    function createPlantMesh(x, y, z, leafColor, name) {
+        const group = new THREE.Group(); group.position.set(x,y,z);
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 0.7, 12), new THREE.MeshStandardMaterial({ color: 0x115e59 }));
+        stem.position.y = 0.35; group.add(stem);
+        const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 12), new THREE.MeshStandardMaterial({ color: leafColor }));
+        leaf.position.y = 0.65; leaf.scale.set(1.4, 0.15, 0.5); group.add(leaf);
+        scene.add(group);
+
+        stem.userData = {
+            name: name, desc: "전극 데이터 노드가 연결되어 실시간 세포 수분 저항 계수를 데이터화 송출하는 온실 내부 정밀 실험 표본 식물체입니다.",
+            camPos: {x: x+1.2, y: y+1.0, z: z+1.2}, lookAt: {x: x, y: y+0.5, z: z}
+        };
+        clickableObjects.push(stem);
+    }
+
+    function onSceneObjectClick(e) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(clickableObjects);
+
+        if (intersects.length > 0) {
+            const data = intersects[0].object.userData;
+            if (data && data.camPos) handleFocusAction(data);
+        }
+    }
+
+    // 패널 버튼에서 하드웨어 지정 클릭 시 카메라 정밀 비행 인터랙션 구동 함수
+    function triggerHardwareFocus(key) {
+        if(hardwareMap[key]) handleFocusAction(hardwareMap[key]);
+    }
+
+    function handleFocusAction(data) {
+        targetCamPos.set(data.camPos.x, data.camPos.y, data.camPos.z);
+        targetLookAt.set(data.lookAt.x, data.lookAt.y, data.lookAt.z);
+        isTransitioning = true;
+        controls.enabled = false;
+
+        document.getElementById('inspectPopup').style.display = 'block';
+        document.getElementById('insTitle').innerText = data.name;
+        document.getElementById('insDesc').innerText = data.desc;
+    }
+
+    function resetCameraView() {
+        targetCamPos.set(14, 11, 15); targetLookAt.set(0, 0, 0);
+        isTransitioning = true; controls.enabled = false;
+        document.getElementById('inspectPopup').style.display = 'none';
+    }
+
+    function toggleSwitch(key) {
+        activeSwitches[key] = !activeSwitches[key];
+        syncUI();
+        updateDashboardData();
+        evaluateMissions();
+    }
+
+    function syncUI() {
+        Object.keys(activeSwitches).forEach(key => {
+            const btn = document.getElementById(`sw-${key}`);
+            const state = document.getElementById(`st-${key}`);
+            if(activeSwitches[key]) { btn.classList.add('active'); state.innerText = "RUN"; } 
+            else { btn.classList.remove('active'); state.innerText = "OFF"; }
+        });
+    }
+
+    function updateDashboardData() {
+        if(activeSwitches.salt) { document.getElementById('val-salt').innerText = "0.10 % (안정)"; document.getElementById('val-salt').style.color = 'var(--neon-green)'; }
+        else { document.getElementById('val-salt').innerText = "0.84 % (위험)"; document.getElementById('val-salt').style.color = 'var(--neon-orange)'; }
+
+        if(activeSwitches.sprinkler) { document.getElementById('val-hum').innerText = "62.0 % (정상)"; document.getElementById('val-hum').style.color = 'var(--neon-green)'; }
+        else { document.getElementById('val-hum').innerText = "28.0 % (건조)"; document.getElementById('val-hum').style.color = 'var(--neon-orange)'; }
+
+        if(activeSwitches.fan || activeSwitches.rain) {
+            let t = 42.5; if(activeSwitches.fan) t -= 9.5; if(activeSwitches.rain) t -= 12.0;
+            document.getElementById('val-temp').innerText = t.toFixed(1) + " °C";
+            document.getElementById('val-temp').style.color = t <= 25 ? 'var(--neon-green)' : 'var(--neon-orange)';
+        } else { document.getElementById('val-temp').innerText = "42.5 °C"; document.getElementById('val-temp').style.color = 'var(--neon-orange)'; }
+
+        if(activeSwitches.drone && activeSwitches.building) { document.getElementById('val-water').innerText = "890 mm (양호)"; document.getElementById('val-water').style.color = 'var(--neon-green)'; }
+        else { document.getElementById('val-water').innerText = "UNKNOWN"; document.getElementById('val-water').style.color = '#64748b'; }
+    }
+
+    function evaluateMissions() {
+        if(activeSwitches.salt && activeSwitches.sprinkler && !solvedMissions.m1) executeClearCard(1, 'm1');
+        if(activeSwitches.fan && activeSwitches.rain && !solvedMissions.m2) executeClearCard(2, 'm2');
+        if(activeSwitches.drone && activeSwitches.building && !solvedMissions.m3) executeClearCard(3, 'm3');
+
+        let score = 0; const total = Object.values(solvedMissions).filter(v => v).length;
+        if(total === 1) score = 33; if(total === 2) score = 66; if(total === 3) score = 100;
+        document.getElementById('txtProgress').innerText = `해결 달성도: ${score}%`;
+    }
+
+    function executeClearCard(id, missionKey) {
+        solvedMissions[missionKey] = true;
+        const overlay = document.getElementById(`overlay${id}`);
+        const card = document.getElementById(`prob${id}`);
+        overlay.style.display = 'flex';
+
+        setTimeout(() => {
+            card.style.transform = 'translateX(-120%)'; card.style.opacity = '0';
+            setTimeout(() => {
+                card.remove();
+                if(document.getElementById('probContainer').children.length === 0) {
+                    document.getElementById('probContainer').innerHTML = "<div style='text-align:center; padding:15px; color:var(--neon-green); font-size:12px; font-weight:bold;'>✔ 스마트 공조 및 전력 연동 과제가 완벽 클리어되었습니다!</div>";
+                }
+            }, 300);
+        }, 1800);
+    }
+
+    let fanRotSpeed = 0;
+
+    // 프레임 애니메이션 메인 루프 내부 물리 연산 
+    function masterLoop() {
+        requestAnimationFrame(masterLoop);
+        const time = Date.now() * 0.002;
+
+        if (isTransitioning) {
+            camera.position.lerp(targetCamPos, 0.08);
+            controls.target.lerp(targetLookAt, 0.08);
+            if (camera.position.distanceTo(targetCamPos) < 0.05) {
+                camera.position.copy(targetCamPos); controls.target.copy(targetLookAt);
+                isTransitioning = false; controls.enabled = true;
+            }
+        }
+        if(controls && !isTransitioning) controls.update();
+
+        let isDischarging = Object.values(activeSwitches).includes(true);
+
+        if(!isDischarging) {
+            // 충전 시 
+            batteryVal = Math.min(100.0, batteryVal + 0.05);
+            gasMoveParticles.material.opacity = Math.min(0.8, gasMoveParticles.material.opacity + 0.04);
+
+            const naPositions = naIonParticles.geometry.attributes.position.array;
+            const clPositions = clIonParticles.geometry.attributes.position.array;
+            const gasPositions = gasMoveParticles.geometry.attributes.position.array;
+
+            for(let i=0; i<naPositions.length; i+=3) {
+                naPositions[i] += (3.4 - naPositions[i]) * 0.02 + (Math.random()-0.5)*0.03;
+                if(naPositions[i] > 3.4) naPositions[i] = 2.6;
+
+                clPositions[i] += (2.6 - clPositions[i]) * 0.02 + (Math.random()-0.5)*0.03;
+                if(clPositions[i] < 2.6) clPositions[i] = 3.4;
+            }
+            naIonParticles.geometry.attributes.position.needsUpdate = true;
+            clIonParticles.geometry.attributes.position.needsUpdate = true;
+
+            // Cl₂ 가스 기체 입자가 파이프를 타고 황색 압축 가스 탱크로 수송 이동
+            for(let i=0; i<gasPositions.length; i+=3) {
+                gasPositions[i+1] += 0.02; 
+                gasPositions[i] += (4.5 - gasPositions[i]) * 0.01;
+                gasPositions[i+2] += (-1.5 - gasPositions[i+2]) * 0.01;
+                if(gasPositions[i+1] > 1.5) { gasPositions[i] = 2.8 + Math.random()*0.4; gasPositions[i+1] = 0.2; gasPositions[i+2] = 2.3 + (Math.random()-0.5)*0.4; }
+            }
+            gasMoveParticles.geometry.attributes.position.needsUpdate = true;
+
+            electronParticles.material.opacity = Math.max(0, electronParticles.material.opacity - 0.1);
+
+        } else {
+            // 방전 시 
+            batteryVal = Math.max(0.0, batteryVal - 0.12);
+            gasMoveParticles.material.opacity = Math.max(0, gasMoveParticles.material.opacity - 0.05);
+
+            const naPositions = naIonParticles.geometry.attributes.position.array;
+            for(let i=0; i<naPositions.length; i+=3) {
+                naPositions[i] += (2.6 - naPositions[i]) * 0.03 + (Math.random()-0.5)*0.04;
+                if(naPositions[i] < 2.6) naPositions[i] = 3.4;
+            }
+            naIonParticles.geometry.attributes.position.needsUpdate = true;
+
+            // ★ 한층 더 밝고 선명해진 초고휘도 가시화 전하 전자 입자의 전선 고속 주행 모션 연산
+            electronParticles.material.opacity = 1.0;
+            const elPositions = electronParticles.geometry.attributes.position.array;
+            for(let i=0; i<elPositions.length; i+=3) {
+                elPositions[i] += (-1.5 - elPositions[i]) * 0.04;
+                elPositions[i+1] += (3.1 - elPositions[i+1]) * 0.04;
+                elPositions[i+2] += (0 - elPositions[i+2]) * 0.04;
+
+                if(Math.abs(elPositions[i] - (-1.5)) < 0.2) {
+                    elPositions[i] = 3.0; elPositions[i+1] = 1.2; elPositions[i+2] = 2.5;
+                }
+            }
+            electronParticles.geometry.attributes.position.needsUpdate = true;
+
+            if(batteryVal <= 0) { Object.keys(activeSwitches).forEach(k => activeSwitches[k] = false); syncUI(); updateDashboardData(); }
+        }
+
+        document.getElementById('barCharge').style.width = batteryVal + '%';
+        document.getElementById('val-charge').innerText = Math.floor(batteryVal) + ' %';
+
+        if(activeSwitches.fan) { fanRotSpeed = Math.min(0.25, fanRotSpeed + 0.006); } else { fanRotSpeed = Math.max(0, fanRotSpeed - 0.006); }
+        if(fanMesh) fanMesh.rotation.y += fanRotSpeed;
+
+        if(activeSwitches.sprinkler) {
+            waterParticles.material.opacity = Math.min(0.8, waterParticles.material.opacity + 0.05);
+            const positions = waterParticles.geometry.attributes.position.array;
+            for(let i=1; i<positions.length; i+=3) { positions[i] -= 0.06; if(positions[i] < 0.2) positions[i] = 3.0; }
+            waterParticles.geometry.attributes.position.needsUpdate = true;
+        } else { waterParticles.material.opacity = Math.max(0, waterParticles.material.opacity - 0.05); }
+
+        if(activeSwitches.drone) {
+            droneMesh.position.x = -1.5 + Math.sin(time * 3) * 1.0;
+            droneMesh.position.y = 0.8 + Math.abs(Math.sin(time * 5)) * 0.12;
+        } else if(droneMesh) { droneMesh.position.set(-1.5, 0.8, 2.5); }
+
+        if(activeSwitches.building) { labBuilding.material.emissive.setHex(0xeab308); labBuilding.material.emissiveIntensity = 1.0; } 
+        else if(labBuilding) { labBuilding.material.emissive.setHex(0x000000); }
+
+        if(activeSwitches.salt) { ghDome.material.color.setHex(0x22c55e); } else { ghDome.material.color.setHex(0x00f3ff); }
+
+        if(renderer && scene && camera) renderer.render(scene, camera);
+    }
+
+    window.onload = () => {
+        initThree();
+        masterLoop();
+    };
+</script>
+
+</body>
+</html>
